@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import time
 import random
 
 # Test to see if data is loaded correctly
@@ -57,39 +58,51 @@ def softmax_derivative(outputs):
     probabilities = softmax(outputs)
     return probabilities * (1 - probabilities)
 
-# def relu(x):
-#     return np.maximum(0, x)
-
 # Neural Network Classes-----------------------------------------
 
 class Neuron:
-    def __init__(self, num_inputs: int=None, activation_function: str='sigmoid'):
+    """
+    Neural Network Neuron
+    """
+    def __init__(self, num_inputs: int=None, activation_function: str=None):
         """
-        Neural Network Neuron
+        Supports sigmoid, linear and softmax activation functions.
+        Weights are initialized randomly between -1 and 1 
+        and bias is initialized randomly between 0 and 1.
         """
-        self.num_inputs = num_inputs
         self.activation_function = activation_function
-        # apply random weights to inputs between -1 and 1
-        self.weights = []
-        if self.num_inputs is not None:
-            for i in range(self.num_inputs):
-                self.weights.append(random.uniform(-1, 1))
-        # apply random bias
-        self.bias = np.random.rand(1)
+        # only if activation function given
+        if activation_function is not None:
+            self.num_inputs = num_inputs
+            self.weights = []
+            # apply random weights to inputs between -1 and 1
+            if self.num_inputs is not None:
+                for i in range(self.num_inputs):
+                    self.weights.append(random.uniform(-1, 1))
+                # convert to numpy array
+                self.weights = np.array(self.weights)
+            # apply random bias
+            self.bias = np.random.rand(1)
     
     def update_neuron_structure(self, num_inputs: int, 
-                                activation_function='sigmoid'):
+                                activation_function):
         """
         This function will update the structure of the neuron
         will also reset weights and bias!!!
+        Weights are initialized randomly between -1 and 1 
+        and bias is initialized randomly between 0 and 1.
         """
-        self.num_inputs = num_inputs
         self.activation_function = activation_function
-        self.weights = []
-        if self.num_inputs is not None:
-            for i in range(self.num_inputs):
-                self.weights.append(random.uniform(-1, 1))
-        self.bias = np.random.rand(1)
+        # only if activation function given
+        if activation_function is not None:
+            self.num_inputs = num_inputs
+            self.weights = []
+            if self.num_inputs is not None:
+                for i in range(self.num_inputs):
+                    self.weights.append(random.uniform(-1, 1))
+                # convert to numpy array
+                self.weights = np.array(self.weights)
+            self.bias = np.random.rand(1)
 
     def update_weights_and_bias(self, weights, bias):
         self.weights = weights
@@ -109,16 +122,30 @@ class Neuron:
         # dot product of inputs and weights
         if self.activation_function == 'sigmoid':
             self.output = sigmoid(np.dot(inputs, self.weights) + self.bias)
-        else: 
-            # for linear and softmax activation functions
-            # softmax needs to be done at layer level
+        elif self.activation_function == 'linear': 
+            # for linear activation functions
             self.output = linear(np.dot(inputs, self.weights) + self.bias)
+        elif self.activation_function == 'softmax':
+            # softmax needs to be done at layer level so just return dot product
+            self.output = np.dot(inputs, self.weights) + self.bias
+        elif self.activation_function is None:
+            # if no activation function is given
+            raise Exception("No activation function given!")
         return self.output
 
 
 class NeuralLayer:
+    """
+    Neural Network Layer
+    """
     def __init__(self, num_neurons: int, neuron_prototype: Neuron=Neuron(), 
                  type: str='hidden'):
+        """
+        The number of neurons in the layer needs to be specified.
+        The neuron_prototype param is a prototype for all neurons in the layer
+        and it will be the default neuron if no neuron is given.
+        type can be 'input', 'hidden' or 'output'.
+        """
         self.type = type
         self.num_neurons = num_neurons
         self.neuron_prototype = neuron_prototype
@@ -159,11 +186,15 @@ class NeuralLayer:
     def feed_forward(self, inputs):
         outputs = []
 
-        # use linear activation function for input layer
         if self.type == 'input':
-            # just feed forward with no changes
-            for input in inputs:
-                outputs.append(input)
+            # just return inputs
+            outputs = inputs
+
+        # use neuron feed forward for hidden layers
+        if self.type == 'hidden':
+            # feed forward and get outputs
+            for neuron in self.neurons:
+                outputs.append(neuron.feed_forward(inputs))
 
         # use softmax activation function for output layer
         elif self.type == 'output':
@@ -173,11 +204,6 @@ class NeuralLayer:
             # apply softmax activation function
             outputs = softmax(outputs)
         
-        # use sigmoid activation function for hidden layers
-        elif self.type == 'hidden':
-            # feed forward and get outputs
-            for neuron in self.neurons:
-                outputs.append(neuron.feed_forward(inputs))
         # convert to numpy array
         outputs = np.array(outputs)
         # reshape to 1D array
@@ -186,16 +212,28 @@ class NeuralLayer:
     
 
 class NeuralNetwork:
+    """
+    Neural Network
+    """
     def __init__(self):
         self.layers = []
-        self.leanring_rate = 0.01
 
     def add_layer(self, layer: NeuralLayer, output_layer: bool=False):
+        """
+        Add layer to neural network.
+        The first layer added will be the input layer.
+        The last layer added will be the output layer and has to be specified.
+        The number of neurons in each layer needs to be specified in the NeuralLayer class.
+        This function will also update the structure of the neurons in the layer, 
+        this includes the number of inputs fo each neuron as well as the activation function.
+        """
         # in case of output layer
         if output_layer:
             layer.type = 'output'
             # update neuron structure for all neurons in layer
             for neuron in layer.neurons:
+                # get number of inputs from previous layer (number of neurons)
+                # activation function is softmax
                 neuron.update_neuron_structure(self.layers[-1].num_neurons, 
                                                activation_function='softmax')
         
@@ -204,8 +242,10 @@ class NeuralNetwork:
             # will just feed forward the inputs with no changes
             layer.type = 'input'
             # update neuron structure for all neurons in layer
+            # activation function is None
             for neuron in layer.neurons:
-                neuron.update_neuron_structure(None, activation_function='linear')
+                neuron.update_neuron_structure(None, 
+                                               activation_function=None)
 
         # all other layers are hidden layers
         elif len(self.layers) > 0:
@@ -213,11 +253,16 @@ class NeuralNetwork:
             # update neuron structure for all neurons in layer
             for neuron in layer.neurons:
                 # get number of inputs from previous layer (number of neurons)
+                # activation function is sigmoid
                 neuron.update_neuron_structure(self.layers[-1].num_neurons,
                                                activation_function='sigmoid')
+                
         self.layers.append(layer)
 
     def feed_forward(self, inputs):
+        """
+        Feed inputs forward through layers of neural network
+        """
         outputs = []
         for layer in self.layers:
             inputs = layer.feed_forward(inputs)
@@ -226,10 +271,13 @@ class NeuralNetwork:
         outputs = inputs
         return outputs
 
-    def stochastic_gradient_descent(self, train_data: tuple, epochs: int, batch_size: int, learning_rate: float, 
+    def stochastic_gradient_descent(self, train_data: tuple, 
+                                    epochs: int, batch_size: int, learning_rate: float, 
                                     test_data: tuple=None):
         """
         Train neural network using stochastic gradient descent
+        train_data is a tuple of (train_x, train_y)
+        (optional) test_data is a tuple of (test_x, test_y)
         """
         train_x, train_y = train_data
         n = len(train_x) # number of training examples
@@ -239,6 +287,9 @@ class NeuralNetwork:
             test_data = train_data
 
         for i in range(epochs):
+            # measure time
+            start = time.time()
+
             print(f"Epoch {i+1}")
             # shuffle data
             print("Shuffling data...",  end='\r')
@@ -261,11 +312,17 @@ class NeuralNetwork:
             # test neural network after each epoch
             accuracy = self.test(test_data)
             accuracy = round(accuracy*100, 2)
-            print(f"Accuracy: {accuracy}%")
+
+            # measure time
+            end = time.time()
+            time_elapsed = round(end - start, 2)
+
+            print(f"Accuracy: {accuracy}% | Time elapsed: {time_elapsed}s")
 
     def shuffle_data(self, data: tuple):
         """
-        Shuffle data
+        Shuffle data.
+        The data is a tuple of (data_x, data_y).
         """
         data_x, data_y = data
         data = pd.concat([data_x, data_y], axis=1)
@@ -275,6 +332,9 @@ class NeuralNetwork:
         return data_x, data_y
 
     def update_batch(self, batch, batch_size, learning_rate):
+        """
+        Update weights and biases for a batch
+        """
         delta_weights = []
         delta_biases = []
 
@@ -316,16 +376,10 @@ class NeuralNetwork:
 
     def back_propagation(self, inputs, desired_output):
         """
-        Determine how a single training example would change the weights and biases
+        Determine how a single training example 
+        would change the weights and biases
         """
-        gradients = []
-        # shape with:
-        # input layer: 784
-        # hidden layer: 16
-        # hidden layer: 16
-        # output layer: 10
-        # is [(16, 784), (16, 16), (10, 16)] for weights
-        # and [(16,), (16,), (10,)] for biases
+        gradients = [] # gradients for each layer
 
         activations = [] # outputs of each layer with activation function applied
         z = [] # outputs of each layer without activation function applied
@@ -361,7 +415,8 @@ class NeuralNetwork:
     
     def test(self, test_data: tuple):
         """
-        Test neural network
+        Test neural network.
+        test_data is a tuple of (test_x, test_y)
         """
         data_x, data_y = test_data
         correct = 0
@@ -385,6 +440,7 @@ def main():
     # load data
     train_x, train_y = load_data('mnist_train.csv')
     test_x, test_y = load_data('mnist_test.csv')
+
     # create neural network
     neural_network = NeuralNetwork()
     # add layers
