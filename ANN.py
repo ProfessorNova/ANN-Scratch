@@ -1,216 +1,223 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import time
-import random
 
-# Test to see if data is loaded correctly
-
-# from PIL import Image
-
-# def load_data(path):
-#     data = pd.read_csv(path)
-#     # just keep first row
-#     data = data.iloc[0, 1:] # should be 5
-#     # reshape to 28x28
-#     data = data.values.reshape(28, 28)
-#     # convert to image
-#     data = Image.fromarray(data.astype('uint8'))
-#     # show image
-#     data.show()
-#     return data
-
-# print(load_data('mnist_train.csv'))
-
-# usefull functions----------------------------------------------
+# USEFULL FUNCTIONS
 
 def load_data(path):
+    """
+    Load data from csv file.
+    (data loader for MNIST dataset)
+    """
+    print(f"Loading {path}...", end=" ")
     data = pd.read_csv(path)
-    # data_x -> features
+    # data_x -> input data
+    # data_y -> output data
     data_x = data.iloc[:, 1:]
+    data_y = data.iloc[:, 0]
     # normalize data
     data_x = data_x / 255.0
-    # data_y -> labels
-    data_y = data.iloc[:, 0]
+    # convert labels to one hot vectors
     desired_output = []
     for i in range(len(data_y)):
         desired_output.append(np.zeros(10))
-        desired_output[i][data_y.iloc[i]] = 1
+        desired_output[i][data_y.iloc[i]] = 1.0
     data_y = pd.DataFrame(desired_output)
+    print("Done")
     return data_x, data_y
 
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
+def shuffle_data(data: tuple):
+    """
+    Shuffle data.
+    The data is a tuple of (data_x, data_y).
+    (data shuffler for MNIST dataset)
+    """
+    print("Shuffling data...", end=" ")
+    data_x, data_y = data
+    data = pd.concat([data_x, data_y], axis=1)
+    data = data.sample(frac=1)
+    data_x = data.iloc[:, :-10]
+    data_y = data.iloc[:, -10:]
+    print("Done")
+    return data_x, data_y
 
-def sigmoid_derivative(x):
-    return sigmoid(x) * (1 - sigmoid(x))
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
 
-def linear(x):
-    return x
+def sigmoid_derivative(z):
+    return sigmoid(z) * (1 - sigmoid(z))
 
-def linear_derivative(x):
+def linear(z):
+    return z
+
+def linear_derivative(z):
     return 1
 
-def softmax(outputs):
-    probabilities = np.exp(outputs) / np.sum(np.exp(outputs))
-    return probabilities
+def softmax(vector):
+    return np.exp(vector) / np.sum(np.exp(vector))
 
-def softmax_derivative(outputs):
-    probabilities = softmax(outputs)
-    return probabilities * (1 - probabilities)
+def softmax_derivative(vector):
+    return softmax(vector) * (1 - softmax(vector))
 
-# Neural Network Classes-----------------------------------------
+# NN CLASSES
 
 class Neuron:
     """
-    Neural Network Neuron
+    Neuron for the Neural Network
     """
-    def __init__(self, num_inputs: int=None, activation_function: str=None):
+    def __init__(self, num_inputs: int, activation_function: str=None):
         """
         Supports sigmoid, linear and softmax activation functions.
-        Weights are initialized randomly between -1 and 1 
-        and bias is initialized randomly between 0 and 1.
+        Weights and biases are initialized randomly between -1 and 1
         """
         self.activation_function = activation_function
-        # only if activation function given
-        if activation_function is not None:
+        self.num_inputs = num_inputs
+        self.weights = np.random.uniform(-1, 1, num_inputs)
+        self.bias = np.random.uniform(-1, 1)
+
+    def update_structure(self, num_inputs: int,
+                            activation_function: str=None):
+            """
+            Update structure of neuron
+            (this will reset the weights and biases)
+            """
+            self.activation_function = activation_function
             self.num_inputs = num_inputs
-            self.weights = []
-            # apply random weights to inputs between -1 and 1
-            if self.num_inputs is not None:
-                for i in range(self.num_inputs):
-                    self.weights.append(random.uniform(-1, 1))
-                # convert to numpy array
-                self.weights = np.array(self.weights)
-            # apply random bias
-            self.bias = np.random.rand(1)
+            self.weights = np.random.uniform(-1, 1, num_inputs)
+            self.bias = np.random.uniform(-1, 1)
+
+    def get_z(self, inputs):
+        # output of neuron before activation function is applied
+        return np.dot(inputs, self.weights) + self.bias
     
-    def update_neuron_structure(self, num_inputs: int, 
-                                activation_function):
-        """
-        This function will update the structure of the neuron
-        will also reset weights and bias!!!
-        Weights are initialized randomly between -1 and 1 
-        and bias is initialized randomly between 0 and 1.
-        """
-        self.activation_function = activation_function
-        # only if activation function given
-        if activation_function is not None:
-            self.num_inputs = num_inputs
-            self.weights = []
-            if self.num_inputs is not None:
-                for i in range(self.num_inputs):
-                    self.weights.append(random.uniform(-1, 1))
-                # convert to numpy array
-                self.weights = np.array(self.weights)
-            self.bias = np.random.rand(1)
-
-    def update_weights_and_bias(self, weights, bias):
-        self.weights = weights
-        self.bias = bias
-
     def get_weights(self):
         return self.weights
     
     def get_bias(self):
         return self.bias
     
-    def get_z(self, inputs):
-        # z is the dot product of inputs and weights without activation function
-        return np.dot(inputs, self.weights) + self.bias
+    def update_weights_and_bias(self, weights, bias):
+        self.weights = weights
+        self.bias = bias
 
     def feed_forward(self, inputs):
-        # dot product of inputs and weights
-        if self.activation_function == 'sigmoid':
-            self.output = sigmoid(np.dot(inputs, self.weights) + self.bias)
-        elif self.activation_function == 'linear': 
-            # for linear activation functions
-            self.output = linear(np.dot(inputs, self.weights) + self.bias)
-        elif self.activation_function == 'softmax':
-            # softmax needs to be done at layer level so just return dot product
-            self.output = np.dot(inputs, self.weights) + self.bias
+        """
+        Returns the output of the neuron with activation function applied
+        """
+        z = self.get_z(inputs)
+        if self.activation_function == "sigmoid":
+            return sigmoid(z)
+        elif self.activation_function == "linear":
+            return linear(z)
+        elif self.activation_function == "softmax":
+            # softmax has to be applied at layer level
+            return z
         elif self.activation_function is None:
-            # if no activation function is given
-            raise Exception("No activation function given!")
-        return self.output
-
-
+            raise Exception("Activation function not defined")
+        else:
+            raise Exception("Activation function not supported")
+        
 class NeuralLayer:
     """
-    Neural Network Layer
+    Layer for the Neural Network
     """
-    def __init__(self, num_neurons: int, neuron_prototype: Neuron=Neuron(), 
-                 type: str='hidden'):
+    def __init__(self, num_neurons: int, type: str, num_inputs: int=None,
+                    activation_function: str=None):
         """
-        The number of neurons in the layer needs to be specified.
-        The neuron_prototype param is a prototype for all neurons in the layer
-        and it will be the default neuron if no neuron is given.
-        type can be 'input', 'hidden' or 'output'.
+        Type can be input, hidden or output
         """
-        self.type = type
         self.num_neurons = num_neurons
-        self.neuron_prototype = neuron_prototype
+        self.type = type
         self.neurons = []
+        # test if activation function is supported
+        if type == "input":
+            if activation_function is not None:
+                raise Exception("Input layer cannot have activation function")
+            
+        elif type == "hidden":
+            if activation_function not in ["sigmoid", "linear", "softmax", None]:
+                raise Exception("Activation function not supported")
+        elif type == "output":
+            if activation_function not in ["sigmoid", "linear", "softmax", None]:
+                raise Exception("Activation function not supported")
+            
+        self.activation_function = activation_function
         for i in range(self.num_neurons):
-            self.neurons.append(Neuron())
+            self.neurons.append(Neuron(num_inputs, activation_function))
 
-    def get_weights(self):
-        weights = []
-        for neuron in self.neurons:
-            weights.append(np.array(neuron.get_weights()))
-        weights = np.array(weights)
-        return weights
+    def update_structure(self, num_neurons: int, type: str, num_inputs: int,
+                            activation_function: str):
+        """
+        Update structure of layer
+        (this will reset the weights and biases)
+        """
+        self.num_neurons = num_neurons
+        self.type = type
+        self.neurons = []
+        self.activation_function = activation_function
+        for i in range(self.num_neurons):
+            self.neurons.append(Neuron(num_inputs, activation_function))
+
+    def get_num_neurons(self):
+        return self.num_neurons
     
-    def get_biases(self):
-        bias = []
-        for neuron in self.neurons:
-            bias.append(neuron.get_bias())
-        bias = np.array(bias)
-        bias = bias.reshape(len(bias),)
-        return bias
+    def get_type(self):
+        return self.type
+
+    def get_activation_function(self):
+        return self.activation_function
 
     def get_z(self, inputs):
-        # return Z for each neuron
-        if self.type == 'input':
+        # return input if layer is input layer
+        if self.type == "input":
             return inputs
         z = []
         for neuron in self.neurons:
             z.append(neuron.get_z(inputs))
+        # convert to numpy array
         z = np.array(z)
         z = z.reshape(len(z),)
         return z
-
+    
+    def get_weights(self):
+        weights = []
+        for neuron in self.neurons:
+            weights.append(neuron.get_weights())
+        # convert to numpy array
+        weights = np.array(weights)
+        return weights
+    
+    def get_bias(self):
+        bias = []
+        for neuron in self.neurons:
+            bias.append(neuron.get_bias())
+        # convert to numpy array
+        bias = np.array(bias)
+        bias = bias.reshape(len(bias),)
+        return bias
+    
     def update_weights_and_bias(self, weights, bias):
         for i in range(len(self.neurons)):
             self.neurons[i].update_weights_and_bias(weights[i], bias[i])
 
     def feed_forward(self, inputs):
-        outputs = []
-
-        if self.type == 'input':
-            # just return inputs
-            outputs = inputs
-
-        # use neuron feed forward for hidden layers
-        if self.type == 'hidden':
-            # feed forward and get outputs
-            for neuron in self.neurons:
-                outputs.append(neuron.feed_forward(inputs))
-
-        # use softmax activation function for output layer
-        elif self.type == 'output':
-            # feed forward and get outputs
-            for neuron in self.neurons:
-                outputs.append(neuron.feed_forward(inputs))
-            # apply softmax activation function
-            outputs = softmax(outputs)
+        """
+        Returns the output of the layer with activation function applied
+        """
+        # return input if layer is input layer
+        if self.type == "input":
+            return inputs
+        z = self.get_z(inputs)
+        # apply activation function to whole layer for performance
+        if self.activation_function == "sigmoid":
+            return sigmoid(z)
+        elif self.activation_function == "linear":
+            return linear(z)
+        elif self.activation_function == "softmax":
+            return softmax(z)
+        elif self.activation_function is None:
+            raise Exception("Activation function not defined")
         
-        # convert to numpy array
-        outputs = np.array(outputs)
-        # reshape to 1D array
-        outputs = outputs.reshape(len(outputs),)
-        return outputs
-    
-
 class NeuralNetwork:
     """
     Neural Network
@@ -218,240 +225,249 @@ class NeuralNetwork:
     def __init__(self):
         self.layers = []
 
-    def add_layer(self, layer: NeuralLayer, output_layer: bool=False):
+    def add_layer(self, layer: NeuralLayer):
         """
-        Add layer to neural network.
-        The first layer added will be the input layer.
-        The last layer added will be the output layer and has to be specified.
-        The number of neurons in each layer needs to be specified in the NeuralLayer class.
-        This function will also update the structure of the neurons in the layer, 
-        this includes the number of inputs fo each neuron as well as the activation function.
+        The first layer added will be set as the input layer.
+        The last layer added will be the output layer
+        and has to be specified as such.
+        The number of neurons has to be specified for all layers.
+        The number of inputs will be overwritten.
+        If no activation function is specified, it will be set appropriately.
         """
-        # in case of output layer
-        if output_layer:
-            layer.type = 'output'
-            # update neuron structure for all neurons in layer
-            for neuron in layer.neurons:
-                # get number of inputs from previous layer (number of neurons)
-                # activation function is softmax
-                neuron.update_neuron_structure(self.layers[-1].num_neurons, 
-                                               activation_function='softmax')
-        
-        # first layer is input layer
-        elif len(self.layers) == 0:
-            # will just feed forward the inputs with no changes
-            layer.type = 'input'
-            # update neuron structure for all neurons in layer
-            # activation function is None
-            for neuron in layer.neurons:
-                neuron.update_neuron_structure(None, 
-                                               activation_function=None)
-
-        # all other layers are hidden layers
-        elif len(self.layers) > 0:
-            layer.type = 'hidden'
-            # update neuron structure for all neurons in layer
-            for neuron in layer.neurons:
-                # get number of inputs from previous layer (number of neurons)
-                # activation function is sigmoid
-                neuron.update_neuron_structure(self.layers[-1].num_neurons,
-                                               activation_function='sigmoid')
-                
+        # handle input layer
+        if len(self.layers) == 0:
+            # first layer added will be the input layer
+            layer.update_structure(layer.get_num_neurons(), "input", None, None)
+        # handle output layer
+        elif layer.get_type() == "output":
+            # last layer added will be the output layer
+            set_activation_function = layer.get_activation_function()
+            if set_activation_function is None:
+                # if no activation function for output layer, set softmax
+                set_activation_function = "softmax"
+            layer.update_structure(layer.get_num_neurons(), "output",
+                                    self.layers[-1].get_num_neurons(),
+                                    set_activation_function)
+        # handle hidden layers
+        else:
+            set_activation_function = layer.get_activation_function()
+            if set_activation_function is None:
+                # if no activation function for hidden layer, set sigmoid
+                set_activation_function = "sigmoid"
+            layer.update_structure(layer.get_num_neurons(), "hidden",
+                                    self.layers[-1].get_num_neurons(),
+                                    set_activation_function)
+        # add layer to network
         self.layers.append(layer)
 
     def feed_forward(self, inputs):
         """
-        Feed inputs forward through layers of neural network
+        Returns the output of the network with activation function applied
         """
-        outputs = []
         for layer in self.layers:
             inputs = layer.feed_forward(inputs)
-            #print(f"{layer.type} layer with {layer.num_neurons} neurons -> outputs:")
-            #print(inputs)
-        outputs = inputs
-        return outputs
-
-    def stochastic_gradient_descent(self, train_data: tuple, 
-                                    epochs: int, batch_size: int, learning_rate: float, 
+        return inputs
+    
+    def stochastic_gradient_descent(self, train_data: tuple,
+                                    epochs: int, batch_size: int,
+                                    learning_rate: float,
                                     test_data: tuple=None):
         """
-        Train neural network using stochastic gradient descent
+        Train the network using stochastic gradient descent
         train_data is a tuple of (train_x, train_y)
         (optional) test_data is a tuple of (test_x, test_y)
         """
         train_x, train_y = train_data
         n = len(train_x) # number of training examples
 
-        # if test data is not provided, use train data for testing
+        # if test data is not given, use train data as test data
         if test_data is None:
             test_data = train_data
 
-        for i in range(epochs):
-            # measure time
-            start = time.time()
+        # start training
+        for epoch in range(epochs):
+            print(f"Epoch {epoch+1}/{epochs}")
 
-            print(f"Epoch {i+1}")
-            # shuffle data
-            print("Shuffling data...",  end='\r')
-            train_data = self.shuffle_data(train_data)
-            print("Shuffling data... Done")
-            train_x, train_y = train_data
+            # start time measurement
+            start_time = time.time()
 
-            # create batches
+            # shuffle training data
+            train_x, train_y = shuffle_data((train_x, train_y))
+
+            # split training data into batches
             batches = []
-            for j in range(0, n, batch_size):
-                batches.append((train_x.iloc[j:j+batch_size], train_y.iloc[j:j+batch_size]))
+            for i in range(0, n, batch_size):
+                batches.append((train_x.iloc[i:i+batch_size],
+                                train_y.iloc[i:i+batch_size]))
+
+            # train on batches
             progress = 0
             for batch in batches:
+                # print progress
                 progress += 1
-                if progress < len(batches):
-                    print(f"Progress: {progress}/{len(batches)}", end='\r')
-                else:
-                    print(f"Progress: Finished!")
-                self.update_batch(batch, batch_size, learning_rate)
-            # test neural network after each epoch
-            accuracy = self.test(test_data)
-            accuracy = round(accuracy*100, 2)
+                print(f"Progress: {round(progress/len(batches)*100, 2)}%", end="\r")
+                # update weights and biases batch
+                self.update_batch(batch, learning_rate)
+            print("Progress: Finished!")
 
-            # measure time
-            end = time.time()
-            time_elapsed = round(end - start, 2)
+            # end time measurement
+            end_time = time.time()
 
-            print(f"Accuracy: {accuracy}% | Time elapsed: {time_elapsed}s")
+            # evaluate epoch
+            accuracy = self.evaluate(test_data)
+            print(f"Accuracy: {round(accuracy*100, 2)}%" +
+                    f" (time: {round(end_time-start_time, 2)} seconds)")
 
-    def shuffle_data(self, data: tuple):
-        """
-        Shuffle data.
-        The data is a tuple of (data_x, data_y).
-        """
-        data_x, data_y = data
-        data = pd.concat([data_x, data_y], axis=1)
-        data = data.sample(frac=1)
-        data_x = data.iloc[:, :-10]
-        data_y = data.iloc[:, -10:]
-        return data_x, data_y
-
-    def update_batch(self, batch, batch_size, learning_rate):
+    def update_batch(self, batch: tuple, learning_rate: float):
         """
         Update weights and biases for a batch
+        batch is a tuple of (batch_x, batch_y)
         """
+        # keep in mind that the input layer has no weights and biases
+        # thus the index of the layer is one less than the index of the batch
         delta_weights = []
-        delta_biases = []
+        delta_bias = []
 
+        # initialize delta_weights and delta_bias
         for layer in self.layers:
-            if layer.type == 'input':
-                # input layer has no weights and biases
+            if layer.get_type() == "input":
                 continue
-            # initialize delta weights and biases as zeros
             delta_weights.append(np.zeros(layer.get_weights().shape))
-            delta_biases.append(np.zeros(layer.get_biases().shape))
-            # shape with:
-            # input layer: 784
-            # hidden layer: 16
-            # hidden layer: 16
-            # output layer: 10
-            # is [(16, 784), (16, 16), (10, 16)] for weights
-            # and [(16,), (16,), (10,)] for biases
+            delta_bias.append(np.zeros(layer.get_bias().shape))
 
-        for i in range(batch_size):
-            gradients = self.back_propagation(batch[0].iloc[i].values, batch[1].iloc[i].values)
+        # get the gradients for each training example in the batch
+        for i in range(len(batch[0])):
+            gradients = self.backpropagation(batch[0].iloc[i].values,
+                                             batch[1].iloc[i].values)
+            # add gradients to delta_weights and delta_bias
             for j in range(len(gradients)):
-                # add gradients to delta weights and biases
                 delta_weights[j] += gradients[j][0]
-                delta_biases[j] += gradients[j][1]
-                # average delta weights and biases
-                delta_weights[j] /= batch_size
-                delta_biases[j] /= batch_size
+                delta_bias[j] += gradients[j][1]
+                # average gradients
+                delta_weights[j] /= len(batch[0])
+                delta_bias[j] /= len(batch[0])
 
         # update weights and biases
-        for i in range(len(self.layers)):
-            if self.layers[i].type == 'input':
-                # input layer has no weights and biases
-                continue
-            weights = self.layers[i].get_weights()
-            biases = self.layers[i].get_biases()
-            weights -= learning_rate * delta_weights[i-1] # i-1 because delta_weights has no input layer
-            biases -= learning_rate * delta_biases[i-1] # i-1 because delta_biases has no input layer
-            self.layers[i].update_weights_and_bias(weights, biases)
+        for i in range(len(self.layers)-1):
+            # input layer is skipped again
+            self.layers[i+1].update_weights_and_bias(
+                self.layers[i+1].get_weights() - learning_rate * delta_weights[i],
+                self.layers[i+1].get_bias() - learning_rate * delta_bias[i]
+            )
 
-    def back_propagation(self, inputs, desired_output):
+    def backpropagation(self, inputs, desired_output):
         """
         Determine how a single training example 
         would change the weights and biases
         """
-        gradients = [] # gradients for each layer
+        # gradients for each layer (except input layer)
+        gradients = [None]*(len(self.layers)-1)
+        activations = [None]*len(self.layers)
+        z_values = [None]*(len(self.layers))
 
-        activations = [] # outputs of each layer with activation function applied
-        z = [] # outputs of each layer without activation function applied
-        for layer in self.layers:
-            activations.append(layer.feed_forward(inputs))
-            z.append(layer.get_z(inputs))
-            inputs = activations[-1] # outputs of previous layer are inputs of next layer
+        # feed forward
+        activations[0] = inputs
+        z_values[0] = inputs
+        for i in range(1, len(self.layers)):
+            z_values[i] = self.layers[i].get_z(activations[i-1])
+            activations[i] = self.layers[i].feed_forward(activations[i-1])
 
-        # Calculate gradients for output layer
-        loss = activations[-1] - desired_output
-        delta_z = loss
+        # calculate gradients for output layer
+        delta_z = activations[-1] - desired_output
 
-        # reverse everything
-        activations = activations[::-1]
-        z = z[::-1]
-        reversed_layers = self.layers[::-1]
+        # calculate gradients for hidden layers
+        for i in range(len(self.layers)-1, 0, -1):
+            # calculate gradients for weights and biases
+            delta_bias = delta_z
+            delta_weights = np.outer(delta_z, activations[i-1])
 
-        # Backpropagate gradients
-        for i, layer in enumerate(reversed_layers):
-            # no calculation for input layer
-            if layer.type == 'input':
-                continue
-            delta_biases = delta_z #/ len(activations[i])
-            delta_weights = np.outer(delta_z, activations[i+1]) #/ len(activations[i])
-            if layer.type == 'output':
-                delta_z = np.matmul(layer.get_weights().T, delta_z) * softmax_derivative(z[i+1])
-            else:
-                delta_z = np.matmul(layer.get_weights().T, delta_z) * sigmoid_derivative(z[i+1])
-            gradients.append((delta_weights, delta_biases))
+            # calculate new delta_z
+            if self.layers[i].get_activation_function() == "sigmoid":
+                delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
+                            sigmoid_derivative(z_values[i-1])
+            elif self.layers[i].get_activation_function() == "linear":
+                delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
+                            linear_derivative(z_values[i-1])
+            elif self.layers[i].get_activation_function() == "softmax":
+                delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
+                            softmax_derivative(z_values[i-1])
+            # save gradients
+            gradients[i-1] = (delta_weights, delta_bias)
         # reverse gradients
-        gradients = gradients[::-1]
         return gradients
     
-    def test(self, test_data: tuple):
+    def evaluate(self, test_data: tuple):
         """
-        Test neural network.
+        Returns the accuracy of the network
         test_data is a tuple of (test_x, test_y)
         """
-        data_x, data_y = test_data
+        test_x, test_y = test_data
         correct = 0
-        for i in range(len(data_x)):
+        for i in range(len(test_x)):
             # feed forward
-            outputs = self.feed_forward(data_x.iloc[i].values)
-            # get prediction
-            prediction = np.argmax(outputs)
-            # get correct output
-            correct_output = np.argmax(data_y.iloc[i].values)
+            output = self.feed_forward(test_x.iloc[i].values)
             # check if prediction is correct
-            if prediction == correct_output:
+            if np.argmax(output) == np.argmax(test_y.iloc[i].values):
                 correct += 1
-        # calculate accuracy
-        accuracy = correct / len(data_x)
-        return accuracy
+        return correct / len(test_x)
     
-# Test Neural Network--------------------------------------------
+    def save(self, path):
+        """
+        save network to file
+        """
+        print(f"Saving network to {path}...", end=" ")
+        # save layers
+        layers = []
+        for layer in self.layers:
+            layers.append({
+                "num_neurons": layer.get_num_neurons(),
+                "type": layer.get_type(),
+                "activation_function": layer.get_activation_function(),
+                "weights": layer.get_weights(),
+                "bias": layer.get_bias()
+            })
+        # save network
+        network = {
+            "layers": layers
+        }
+        np.save(path, network)
+        print("Done")
+
+    def load(self, path):
+        """
+        load network from file
+        """
+        print(f"Loading network from {path}...", end=" ")
+        # load network
+        network = np.load(path, allow_pickle=True).item()
+        # load layers
+        for layer in network["layers"]:
+            self.add_layer(NeuralLayer(layer["num_neurons"], layer["type"],
+                                        None, layer["activation_function"]))
+            self.layers[-1].update_weights_and_bias(layer["weights"], layer["bias"])
+        print("Done")
+
+# MAIN
 
 def main():
     # load data
-    train_x, train_y = load_data('mnist_train.csv')
-    test_x, test_y = load_data('mnist_test.csv')
+    train_data = load_data("mnist_train.csv")
+    test_data = load_data("mnist_test.csv")
 
-    # create neural network
-    neural_network = NeuralNetwork()
+    # initialize network
+    network = NeuralNetwork()
+
     # add layers
-    neural_network.add_layer(NeuralLayer(784)) # first layer = input layer
-    neural_network.add_layer(NeuralLayer(128)) # hidden layer
-    neural_network.add_layer(NeuralLayer(10), output_layer=True) # output layer
+    network.add_layer(NeuralLayer(784, "input"))
+    network.add_layer(NeuralLayer(128, "hidden"))
+    network.add_layer(NeuralLayer(10, "output"))
 
-    # train neural network
-    neural_network.stochastic_gradient_descent(train_data=(train_x, train_y), epochs=100, 
-                                               batch_size=12, learning_rate=0.01,
-                                               test_data=(test_x, test_y))
+    # train network
+    network.stochastic_gradient_descent(train_data, 20, 24, 0.1, 
+                                        test_data)
+    
+    # save network
+    network.save("network.npy")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
