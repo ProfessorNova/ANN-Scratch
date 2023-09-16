@@ -441,6 +441,7 @@ class NeuralNetwork:
         # load network
         network = np.load(path, allow_pickle=True).item()
         # load layers
+        self.layers = []
         for layer in network["layers"]:
             self.add_layer(NeuralLayer(layer["num_neurons"], layer["type"],
                                         None, layer["activation_function"]))
