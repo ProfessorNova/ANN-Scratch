@@ -460,7 +460,8 @@ def main():
 
     # add layers
     network.add_layer(NeuralLayer(784, "input"))
-    network.add_layer(NeuralLayer(128, "hidden"))
+    network.add_layer(NeuralLayer(16, "hidden"))
+    network.add_layer(NeuralLayer(16, "hidden"))
     network.add_layer(NeuralLayer(10, "output"))
 
     # train network
