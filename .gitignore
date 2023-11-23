@@ -1,2 +1,5 @@
 *.npy
 *.csv
+__pycache__
+wandb
+digit.png

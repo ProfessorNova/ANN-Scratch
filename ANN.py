@@ -1,6 +1,24 @@
 import numpy as np
 import pandas as pd
-import time
+import logging
+from fastprogress import master_bar, progress_bar
+from types import SimpleNamespace
+import wandb
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+config = SimpleNamespace(
+    run_name="default",
+    epochs=20,
+    batch_size=24,
+    learning_rate=0.1,
+    train_data_path = "mnist_train.csv",
+    test_data_path = "mnist_test.csv",
+)
 
 # USEFULL FUNCTIONS
 
@@ -9,7 +27,7 @@ def load_data(path):
     Load data from csv file.
     (data loader for MNIST dataset)
     """
-    print(f"Loading {path}...", end=" ")
+    logging.info(f"Loading {path}")
     data = pd.read_csv(path)
     # data_x -> input data
     # data_y -> output data
@@ -23,7 +41,7 @@ def load_data(path):
         desired_output.append(np.zeros(10))
         desired_output[i][data_y.iloc[i]] = 1.0
     data_y = pd.DataFrame(desired_output)
-    print("Done")
+    logging.info(f"Loaded {path}")
     return data_x, data_y
 
 def shuffle_data(data: tuple):
@@ -32,13 +50,11 @@ def shuffle_data(data: tuple):
     The data is a tuple of (data_x, data_y).
     (data shuffler for MNIST dataset)
     """
-    print("Shuffling data...", end=" ")
     data_x, data_y = data
     data = pd.concat([data_x, data_y], axis=1)
     data = data.sample(frac=1)
     data_x = data.iloc[:, :-10]
     data_y = data.iloc[:, -10:]
-    print("Done")
     return data_x, data_y
 
 def sigmoid(z):
@@ -58,6 +74,12 @@ def softmax(vector):
 
 def softmax_derivative(vector):
     return softmax(vector) * (1 - softmax(vector))
+
+def relu(z):
+    return np.maximum(0, z)
+
+def relu_derivative(z):
+    return np.where(z > 0, 1, 0)
 
 # NN CLASSES
 
@@ -107,6 +129,8 @@ class Neuron:
         z = self.get_z(inputs)
         if self.activation_function == "sigmoid":
             return sigmoid(z)
+        elif self.activation_function == "relu":
+            return relu(z)
         elif self.activation_function == "linear":
             return linear(z)
         elif self.activation_function == "softmax":
@@ -133,12 +157,11 @@ class NeuralLayer:
         if type == "input":
             if activation_function is not None:
                 raise Exception("Input layer cannot have activation function")
-            
         elif type == "hidden":
-            if activation_function not in ["sigmoid", "linear", "softmax", None]:
+            if activation_function not in ["sigmoid", "relu", "linear", "softmax", None]:
                 raise Exception("Activation function not supported")
         elif type == "output":
-            if activation_function not in ["sigmoid", "linear", "softmax", None]:
+            if activation_function not in ["sigmoid", "relu", "linear", "softmax", None]:
                 raise Exception("Activation function not supported")
             
         self.activation_function = activation_function
@@ -211,6 +234,8 @@ class NeuralLayer:
         # apply activation function to whole layer for performance
         if self.activation_function == "sigmoid":
             return sigmoid(z)
+        elif self.activation_function == "relu":
+            return relu(z)
         elif self.activation_function == "linear":
             return linear(z)
         elif self.activation_function == "softmax":
@@ -267,7 +292,38 @@ class NeuralNetwork:
         for layer in self.layers:
             inputs = layer.feed_forward(inputs)
         return inputs
-    
+
+    def calculate_loss(self, data):
+        """
+        Calculate the average cross-entropy loss on a given dataset.
+        
+        Args:
+        - data: A tuple containing the features and labels in the form (data_x, data_y)
+        
+        Returns:
+        - The average loss as a float.
+        """
+        data_x, data_y = data
+        total_loss = 0
+        n = len(data_x)
+
+        # Iterate over all examples
+        for i in range(n):
+            # Feed forward to get the output probabilities
+            output_probs = self.feed_forward(data_x.iloc[i].values)
+            
+            # Calculate cross-entropy loss for the current example
+            # Note: Adding a small value epsilon to avoid log(0)
+            epsilon = 1e-12
+            output_probs = np.clip(output_probs, epsilon, 1. - epsilon)
+            loss = -np.sum(data_y.iloc[i].values * np.log(output_probs))
+            
+            total_loss += loss
+
+        # Return the average loss
+        return total_loss / n
+
+
     def stochastic_gradient_descent(self, train_data: tuple,
                                     epochs: int, batch_size: int,
                                     learning_rate: float,
@@ -277,6 +333,7 @@ class NeuralNetwork:
         train_data is a tuple of (train_x, train_y)
         (optional) test_data is a tuple of (test_x, test_y)
         """
+        logging.info("Starting training")
         train_x, train_y = train_data
         n = len(train_x) # number of training examples
 
@@ -285,14 +342,22 @@ class NeuralNetwork:
             test_data = train_data
 
         # start training
-        for epoch in range(epochs):
-            print(f"Epoch {epoch+1}/{epochs}")
+        mb = master_bar(range(epochs))
+        mb.names = ['Training loss', 'Validation loss']
 
-            # start time measurement
-            start_time = time.time()
+        # Initial loss values before training starts
+        training_losses = []
+        validation_losses = []
+        accuracies = []
+
+        for epoch in mb:
+            mb.main_bar.comment = 'total progress'
 
             # shuffle training data
             train_x, train_y = shuffle_data((train_x, train_y))
+
+            # Initialize loss accumulation
+            epoch_training_loss = 0
 
             # split training data into batches
             batches = []
@@ -300,23 +365,49 @@ class NeuralNetwork:
                 batches.append((train_x.iloc[i:i+batch_size],
                                 train_y.iloc[i:i+batch_size]))
 
-            # train on batches
-            progress = 0
-            for batch in batches:
-                # print progress
-                progress += 1
-                print(f"Progress: {round(progress/len(batches)*100, 2)}%", end="\r")
+            # process each batch
+            for batch in progress_bar(batches, parent=mb):
+                mb.child.comment = 'epoch progress'
                 # update weights and biases batch
-                self.update_batch(batch, learning_rate)
-            print("Progress: Finished!")
+                batch_loss = self.update_batch(batch, learning_rate)
+                epoch_training_loss += batch_loss * len(batch[0])
+            
+            # Calculate average training loss for the epoch
+            epoch_training_loss /= n
+            training_losses.append(epoch_training_loss)
 
-            # end time measurement
-            end_time = time.time()
+            # Calculate validation loss
+            epoch_validation_loss = self.calculate_loss(test_data)
+            validation_losses.append(epoch_validation_loss)
 
-            # evaluate epoch
+            # Update graph with the new losses
+            mb.update_graph([[range(1, epoch + 2),  training_losses],
+                            [range(1, epoch + 2), validation_losses]], 
+                            [1, epochs], [0, 3])
+
+            # Update wandb
+            wandb.log({"loss" : wandb.plot.line_series(
+                xs=range(1, epoch + 2),
+                ys=[training_losses, validation_losses],
+                keys=["training", "validation"],
+                title="Loss",
+                xname="Epoch",
+            )})
+
+            # Evaluate accuracy if desired
             accuracy = self.evaluate(test_data)
-            print(f"Accuracy: {round(accuracy*100, 2)}%" +
-                    f" (time: {round(end_time-start_time, 2)} seconds)")
+            accuracies.append(accuracy)
+            mb.write(f'Epoch {epoch + 1} - Training Loss: {epoch_training_loss:.4f}, Validation Loss: {epoch_validation_loss:.4f}, ' +
+                     f'Accuracy: {accuracy:.2%}')
+            
+            # Update wandb
+            wandb.log({"accuracy" : wandb.plot.line_series(
+                xs=range(1, epoch + 2),
+                ys=[accuracies],
+                keys=["accuracy"],
+                title="Accuracy",
+                xname="Epoch",
+            )})
 
     def update_batch(self, batch: tuple, learning_rate: float):
         """
@@ -336,9 +427,12 @@ class NeuralNetwork:
             delta_bias.append(np.zeros(layer.get_bias().shape))
 
         # get the gradients for each training example in the batch
+        batch_loss = 0
         for i in range(len(batch[0])):
-            gradients = self.backpropagation(batch[0].iloc[i].values,
-                                             batch[1].iloc[i].values)
+            gradients, loss = self.backpropagation(batch[0].iloc[i].values,
+                                                    batch[1].iloc[i].values)
+            batch_loss += loss
+
             # add gradients to delta_weights and delta_bias
             for j in range(len(gradients)):
                 delta_weights[j] += gradients[j][0]
@@ -355,10 +449,17 @@ class NeuralNetwork:
                 self.layers[i+1].get_bias() - learning_rate * delta_bias[i]
             )
 
+        batch_loss /= len(batch[0])
+        return batch_loss
+
     def backpropagation(self, inputs, desired_output):
         """
         Determine how a single training example 
-        would change the weights and biases
+        would change the weights and biases and calculate the loss.
+        
+        Returns:
+        - The gradients for each layer (except input layer).
+        - The cross-entropy loss for the given input and desired output.
         """
         # gradients for each layer (except input layer)
         gradients = [None]*(len(self.layers)-1)
@@ -374,6 +475,7 @@ class NeuralNetwork:
 
         # calculate gradients for output layer
         delta_z = activations[-1] - desired_output
+        loss = -np.sum(desired_output * np.log(activations[-1] + 1e-12))  # cross-entropy loss
 
         # calculate gradients for hidden layers
         for i in range(len(self.layers)-1, 0, -1):
@@ -385,6 +487,9 @@ class NeuralNetwork:
             if self.layers[i].get_activation_function() == "sigmoid":
                 delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
                             sigmoid_derivative(z_values[i-1])
+            elif self.layers[i].get_activation_function() == "relu":
+                delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
+                relu_derivative(z_values[i-1])
             elif self.layers[i].get_activation_function() == "linear":
                 delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
                             linear_derivative(z_values[i-1])
@@ -394,7 +499,7 @@ class NeuralNetwork:
             # save gradients
             gradients[i-1] = (delta_weights, delta_bias)
         # reverse gradients
-        return gradients
+        return gradients, loss
     
     def evaluate(self, test_data: tuple):
         """
@@ -415,7 +520,6 @@ class NeuralNetwork:
         """
         save network to file
         """
-        print(f"Saving network to {path}...", end=" ")
         # save layers
         layers = []
         for layer in self.layers:
@@ -431,13 +535,15 @@ class NeuralNetwork:
             "layers": layers
         }
         np.save(path, network)
-        print("Done")
+        logging.info(f"Saved network to {path}")
+        at = wandb.Artifact("network", type="network", metadata={"layers": layers})
+        at.add_file(path)
+        wandb.log_artifact(at)
 
     def load(self, path):
         """
         load network from file
         """
-        print(f"Loading network from {path}...", end=" ")
         # load network
         network = np.load(path, allow_pickle=True).item()
         # load layers
@@ -446,30 +552,4 @@ class NeuralNetwork:
             self.add_layer(NeuralLayer(layer["num_neurons"], layer["type"],
                                         None, layer["activation_function"]))
             self.layers[-1].update_weights_and_bias(layer["weights"], layer["bias"])
-        print("Done")
-
-# MAIN
-
-def main():
-    # load data
-    train_data = load_data("mnist_train.csv")
-    test_data = load_data("mnist_test.csv")
-
-    # initialize network
-    network = NeuralNetwork()
-
-    # add layers
-    network.add_layer(NeuralLayer(784, "input"))
-    network.add_layer(NeuralLayer(16, "hidden"))
-    network.add_layer(NeuralLayer(16, "hidden"))
-    network.add_layer(NeuralLayer(10, "output"))
-
-    # train network
-    network.stochastic_gradient_descent(train_data, 20, 24, 0.1, 
-                                        test_data)
-    
-    # save network
-    network.save("network.npy")
-
-if __name__ == "__main__":
-    main()
+        logging.info(f"Loaded network from {path}")
