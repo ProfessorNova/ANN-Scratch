@@ -66,7 +66,7 @@ class DrawingApp:
 
 # Load your trained network
 network = NeuralNetwork()
-network.load("mnist_network2.npy")
+network.load("mnist_network4.npy")
 
 # Run the drawing and classification application
 app = DrawingApp(network)

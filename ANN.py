@@ -12,12 +12,15 @@ logging.basicConfig(
 )
 
 config = SimpleNamespace(
-    run_name="default",
-    epochs=20,
-    batch_size=24,
-    learning_rate=0.1,
-    train_data_path = "mnist_train.csv",
-    test_data_path = "mnist_test.csv",
+    run_name="more_complex_run",
+    epochs=50,  # Keeping a higher number of epochs
+    batch_size=64,  # Same batch size as before
+    learning_rate=0.05,  # Starting with a slightly lower learning rate
+    lr_decay_rate=0.95,  # Less aggressive decay rate
+    lr_decay_frequency=5,  # Decay learning rate every 5 epochs
+    early_stop_patience=10,  # More patience before early stopping
+    train_data_path="mnist_train.csv",
+    test_data_path="mnist_test.csv",
 )
 
 # USEFULL FUNCTIONS
@@ -70,6 +73,11 @@ def linear_derivative(z):
     return 1
 
 def softmax(vector):
+    # test if a value is too large or too small
+    if np.any(vector > 709):
+        vector = np.where(vector > 709, 709, vector)
+    if np.any(vector < -709):
+        vector = np.where(vector < -709, -709, vector)
     return np.exp(vector) / np.sum(np.exp(vector))
 
 def softmax_derivative(vector):
@@ -325,8 +333,7 @@ class NeuralNetwork:
 
 
     def stochastic_gradient_descent(self, train_data: tuple,
-                                    epochs: int, batch_size: int,
-                                    learning_rate: float,
+                                    config: SimpleNamespace,
                                     test_data: tuple=None):
         """
         Train the network using stochastic gradient descent
@@ -342,16 +349,18 @@ class NeuralNetwork:
             test_data = train_data
 
         # start training
-        mb = master_bar(range(epochs))
+        mb = master_bar(range(config.epochs))
         mb.names = ['Training loss', 'Validation loss']
 
         # Initial loss values before training starts
-        training_losses = []
-        validation_losses = []
-        accuracies = []
+        training_losses, validation_losses, accuracies = [], [], []
+        best_validation_loss = float('inf')
+        epochs_no_improve = 0
+        learning_rate = config.learning_rate
 
         for epoch in mb:
             mb.main_bar.comment = 'total progress'
+
 
             # shuffle training data
             train_x, train_y = shuffle_data((train_x, train_y))
@@ -361,9 +370,9 @@ class NeuralNetwork:
 
             # split training data into batches
             batches = []
-            for i in range(0, n, batch_size):
-                batches.append((train_x.iloc[i:i+batch_size],
-                                train_y.iloc[i:i+batch_size]))
+            for i in range(0, n, config.batch_size):
+                batches.append((train_x.iloc[i:i+config.batch_size],
+                                train_y.iloc[i:i+config.batch_size]))
 
             # process each batch
             for batch in progress_bar(batches, parent=mb):
@@ -383,7 +392,7 @@ class NeuralNetwork:
             # Update graph with the new losses
             mb.update_graph([[range(1, epoch + 2),  training_losses],
                             [range(1, epoch + 2), validation_losses]], 
-                            [1, epochs], [0, 3])
+                            [1, config.epochs], [0, 3])
 
             # Update wandb
             wandb.log({"loss" : wandb.plot.line_series(
@@ -408,6 +417,30 @@ class NeuralNetwork:
                 title="Accuracy",
                 xname="Epoch",
             )})
+
+            # Update learning rate with schedule
+            if epoch % config.lr_decay_frequency == 0:
+                learning_rate *= config.lr_decay_rate
+                wandb.log({"epoch": epoch, "learning_rate": learning_rate})
+
+            # Early stopping check
+            if epoch_validation_loss < best_validation_loss:
+                best_validation_loss = epoch_validation_loss
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+            if epochs_no_improve == config.early_stop_patience:
+                print(f'Early stopping triggered at epoch {epoch + 1}')
+                break  # Stop training if validation loss has not improved in 'early_stop_patience' epochs.
+
+            # Log training and validation loss and accuracy
+            wandb.log({
+                "epoch": epoch,
+                "training_loss": epoch_training_loss,
+                "validation_loss": epoch_validation_loss,
+                "accuracy": accuracy
+            })
 
     def update_batch(self, batch: tuple, learning_rate: float):
         """
@@ -489,7 +522,7 @@ class NeuralNetwork:
                             sigmoid_derivative(z_values[i-1])
             elif self.layers[i].get_activation_function() == "relu":
                 delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
-                relu_derivative(z_values[i-1])
+                            relu_derivative(z_values[i-1])
             elif self.layers[i].get_activation_function() == "linear":
                 delta_z = np.matmul(self.layers[i].get_weights().T, delta_z) * \
                             linear_derivative(z_values[i-1])
