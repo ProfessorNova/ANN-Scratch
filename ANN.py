@@ -154,12 +154,13 @@ class NeuralLayer:
     Layer for the Neural Network
     """
     def __init__(self, num_neurons: int, type: str, num_inputs: int=None,
-                    activation_function: str=None):
+                    activation_function: str=None, dropout_rate: float=0.0):
         """
         Type can be input, hidden or output
         """
         self.num_neurons = num_neurons
         self.type = type
+        self.dropout_rate = dropout_rate
         self.neurons = []
         # test if activation function is supported
         if type == "input":
@@ -231,7 +232,7 @@ class NeuralLayer:
         for i in range(len(self.neurons)):
             self.neurons[i].update_weights_and_bias(weights[i], bias[i])
 
-    def feed_forward(self, inputs):
+    def feed_forward(self, inputs, train_mode: bool=False):
         """
         Returns the output of the layer with activation function applied
         """
@@ -239,6 +240,11 @@ class NeuralLayer:
         if self.type == "input":
             return inputs
         z = self.get_z(inputs)
+        # apply dropout if layer is not input layer and train_mode is True
+        if self.type != "input" and train_mode and self.dropout_rate > 0:
+            # Apply dropout during training
+            dropout_mask = np.random.binomial(1, 1 - self.dropout_rate, size=z.shape)
+            z *= dropout_mask
         # apply activation function to whole layer for performance
         if self.activation_function == "sigmoid":
             return sigmoid(z)
@@ -293,12 +299,12 @@ class NeuralNetwork:
         # add layer to network
         self.layers.append(layer)
 
-    def feed_forward(self, inputs):
+    def feed_forward(self, inputs, train_mode: bool=False):
         """
         Returns the output of the network with activation function applied
         """
         for layer in self.layers:
-            inputs = layer.feed_forward(inputs)
+            inputs = layer.feed_forward(inputs, train_mode=train_mode)
         return inputs
 
     def calculate_loss(self, data):
@@ -378,7 +384,7 @@ class NeuralNetwork:
             for batch in progress_bar(batches, parent=mb):
                 mb.child.comment = 'epoch progress'
                 # update weights and biases batch
-                batch_loss = self.update_batch(batch, learning_rate)
+                batch_loss = self.update_batch(batch, learning_rate, train_mode=True)
                 epoch_training_loss += batch_loss * len(batch[0])
             
             # Calculate average training loss for the epoch
@@ -392,7 +398,7 @@ class NeuralNetwork:
             # Update graph with the new losses
             mb.update_graph([[range(1, epoch + 2),  training_losses],
                             [range(1, epoch + 2), validation_losses]], 
-                            [1, config.epochs], [0, 3])
+                            [1, config.epochs], [0, 10])
 
             # Update wandb
             wandb.log({"loss" : wandb.plot.line_series(
@@ -442,7 +448,7 @@ class NeuralNetwork:
                 "accuracy": accuracy
             })
 
-    def update_batch(self, batch: tuple, learning_rate: float):
+    def update_batch(self, batch: tuple, learning_rate: float, train_mode: bool=True):
         """
         Update weights and biases for a batch
         batch is a tuple of (batch_x, batch_y)
@@ -463,7 +469,8 @@ class NeuralNetwork:
         batch_loss = 0
         for i in range(len(batch[0])):
             gradients, loss = self.backpropagation(batch[0].iloc[i].values,
-                                                    batch[1].iloc[i].values)
+                                                   batch[1].iloc[i].values,
+                                                   train_mode=train_mode)
             batch_loss += loss
 
             # add gradients to delta_weights and delta_bias
@@ -485,7 +492,7 @@ class NeuralNetwork:
         batch_loss /= len(batch[0])
         return batch_loss
 
-    def backpropagation(self, inputs, desired_output):
+    def backpropagation(self, inputs, desired_output, train_mode):
         """
         Determine how a single training example 
         would change the weights and biases and calculate the loss.
@@ -504,7 +511,7 @@ class NeuralNetwork:
         z_values[0] = inputs
         for i in range(1, len(self.layers)):
             z_values[i] = self.layers[i].get_z(activations[i-1])
-            activations[i] = self.layers[i].feed_forward(activations[i-1])
+            activations[i] = self.layers[i].feed_forward(activations[i-1], train_mode)
 
         # calculate gradients for output layer
         delta_z = activations[-1] - desired_output
@@ -542,8 +549,8 @@ class NeuralNetwork:
         test_x, test_y = test_data
         correct = 0
         for i in range(len(test_x)):
-            # feed forward
-            output = self.feed_forward(test_x.iloc[i].values)
+            # feed forward with train_mode=False to disable dropout
+            output = self.feed_forward(test_x.iloc[i].values, train_mode=False)
             # check if prediction is correct
             if np.argmax(output) == np.argmax(test_y.iloc[i].values):
                 correct += 1
