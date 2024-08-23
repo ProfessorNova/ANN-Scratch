@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     # Train the neural network
     nn.stochastic_gradient_descent(train_data,
-                                   epochs=50,
+                                   epochs=5,
                                    batch_size=32,
                                    learning_rate=0.01,
                                    test_data=test_data)
