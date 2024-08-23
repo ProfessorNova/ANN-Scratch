@@ -1,5 +1,3 @@
-import numpy as np
-
 from lib.activation_functions import *
 
 
@@ -20,11 +18,11 @@ class NeuralLayer:
         z = np.dot(inputs, self.weights) + self.bias
         # Apply the activation function
         if self.activation_function == "sigmoid":
-            return self.sigmoid(z)
+            return sigmoid(z)
         elif self.activation_function == "relu":
-            return self.relu(z)
+            return relu(z)
         elif self.activation_function == "softmax":
-            return self.softmax(z)
+            return softmax(z)
         elif self.activation_function == "linear":
             return z
         return z
@@ -32,13 +30,13 @@ class NeuralLayer:
     def activation_derivative(self, z):
         # Calculate the derivative of the activation function
         if self.activation_function == "sigmoid":
-            return self.sigmoid_derivative(z)
+            return sigmoid_derivative(z)
         elif self.activation_function == "relu":
-            return self.relu_derivative(z)
+            return relu_derivative(z)
         elif self.activation_function == "softmax":
-            return self.softmax_derivative(z)
+            return softmax_derivative(z)
         elif self.activation_function == "linear":
-            return self.linear_derivative(z)
+            return linear_derivative(z)
         return z
 
     def update_weights_and_bias(self, delta_weights, delta_bias):
